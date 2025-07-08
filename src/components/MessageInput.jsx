@@ -1,41 +1,68 @@
 import { Smile, Send } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 
 export default function MessageInput({ onSend }) {
   const [text, setText] = useState('');
+  const wsRef = useRef(null);
+  const userIdRef = useRef('alice'); // Default user for demo
 
-  // const sendMessage = () => {
-  //   if (text.trim()) {
-  //     console.log('Message sent:', text);
-  //     onSend(text);
-  //     setText('');
-  //   }
-  // };
+  useEffect(() => {
+    // Initialize WebSocket connection
+    const userId = userIdRef.current;
+    wsRef.current = new WebSocket(`ws://localhost:8000/ws/${userId}`);
+    
+    wsRef.current.onopen = () => {
+      console.log('WebSocket connected');
+    };
+    
+    wsRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      console.log('Received:', data);
+      
+      // Handle different message types
+      switch(data.type) {
+        case 'initial_data':
+          console.log('Initial data received:', data);
+          break;
+        case 'new_message':
+          console.log('New message:', data.message);
+          break;
+        case 'online_users_update':
+          console.log('Online users:', data.online_users);
+          break;
+      }
+    };
+    
+    wsRef.current.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+    
+    wsRef.current.onerror = (error) => {
+      console.error('WebSocket error:', error);
+    };
+    
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+      }
+    };
+  }, []);
 
-  const sendMessage = async () => {
+  const sendMessage = () => {
     if (text.trim()) {
       console.log('Message sent:', text);
-      onSend(text);
-  
-      try {
-        const response = await fetch('http://localhost:5000/api/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ message: text }),
-        });
-  
-        if (!response.ok) {
-          throw new Error('Failed to send message');
-        }
-  
-        const data = await response.json();
-        console.log('Server response:', data);
-      } catch (error) {
-        console.error('Error sending message:', error);
+      
+      // Send via WebSocket
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'send_message',
+          chat_id: 'chat_1', // Default chat for demo
+          text: text
+        }));
       }
-  
+      
+      // Also call the original onSend for UI update
+      onSend(text);
       setText('');
     }
   };
