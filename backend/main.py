@@ -1,236 +1,201 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Optional
+from typing import Dict, List
 import json
 import asyncio
 from datetime import datetime
 import uuid
-from models import User, Chat, Message, MessageType
-from connection_manager import ConnectionManager
-from chat_service import ChatService
 
-app = FastAPI(title="WhatsApp Clone Backend", version="1.0.0")
+app = FastAPI()
 
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Initialize services
-connection_manager = ConnectionManager()
-chat_service = ChatService()
+# Store active connections
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: Dict[str, WebSocket] = {}
+        self.users: Dict[str, dict] = {}
+
+    async def connect(self, websocket: WebSocket, user_id: str):
+        await websocket.accept()
+        self.active_connections[user_id] = websocket
+        self.users[user_id] = {
+            "id": user_id,
+            "name": user_id,
+            "avatar": f"https://i.pravatar.cc/150?u={user_id}",
+            "online": True
+        }
+
+    def disconnect(self, user_id: str):
+        if user_id in self.active_connections:
+            del self.active_connections[user_id]
+        if user_id in self.users:
+            self.users[user_id]["online"] = False
+
+    async def send_personal_message(self, message: str, user_id: str):
+        if user_id in self.active_connections:
+            try:
+                await self.active_connections[user_id].send_text(message)
+            except:
+                self.disconnect(user_id)
+
+    async def broadcast(self, message: str):
+        disconnected = []
+        for user_id, connection in self.active_connections.items():
+            try:
+                await connection.send_text(message)
+            except:
+                disconnected.append(user_id)
+        
+        for user_id in disconnected:
+            self.disconnect(user_id)
+
+manager = ConnectionManager()
+
+# Simple in-memory storage
+chats = {
+    "1": {
+        "id": "1",
+        "name": "Alice",
+        "type": "private",
+        "avatar": "https://i.pravatar.cc/150?img=1",
+        "participants": ["alice", "bob"],
+        "messages": [
+            {
+                "id": str(uuid.uuid4()),
+                "text": "Hey there!",
+                "sender": "alice",
+                "senderName": "Alice",
+                "time": "10:00 AM",
+                "timestamp": datetime.now().isoformat()
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "text": "How are you doing?",
+                "sender": "bob",
+                "senderName": "Bob",
+                "time": "10:01 AM",
+                "timestamp": datetime.now().isoformat()
+            }
+        ]
+    },
+    "2": {
+        "id": "2",
+        "name": "Bob",
+        "type": "private",
+        "avatar": "https://i.pravatar.cc/150?img=2",
+        "participants": ["alice", "bob"],
+        "messages": [
+            {
+                "id": str(uuid.uuid4()),
+                "text": "Meeting at 3?",
+                "sender": "bob",
+                "senderName": "Bob",
+                "time": "10:02 AM",
+                "timestamp": datetime.now().isoformat()
+            }
+        ]
+    },
+    "3": {
+        "id": "3",
+        "name": "Team Project",
+        "type": "group",
+        "avatar": "https://i.pravatar.cc/150?img=5",
+        "participants": ["alice", "bob", "charlie", "diana"],
+        "messages": [
+            {
+                "id": str(uuid.uuid4()),
+                "text": "Let's start the call!",
+                "sender": "alice",
+                "senderName": "Alice",
+                "time": "09:00 AM",
+                "timestamp": datetime.now().isoformat()
+            },
+            {
+                "id": str(uuid.uuid4()),
+                "text": "Joining in 5 mins",
+                "sender": "charlie",
+                "senderName": "Charlie",
+                "time": "09:01 AM",
+                "timestamp": datetime.now().isoformat()
+            }
+        ]
+    }
+}
 
 @app.get("/")
 async def root():
-    return {"message": "WhatsApp Clone Backend is running!"}
-
-@app.get("/api/health")
-async def health_check():
-    return {"status": "healthy", "timestamp": datetime.now().isoformat()}
+    return {"message": "Chat Backend Running"}
 
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
-    """Main WebSocket endpoint for real-time chat communication"""
-    await connection_manager.connect(websocket, user_id)
+    await manager.connect(websocket, user_id)
     
     try:
-        # Send initial data to the connected user
-        await send_initial_data(websocket, user_id)
+        # Send initial data
+        user_chats = []
+        for chat_id, chat in chats.items():
+            if user_id in chat["participants"]:
+                user_chats.append(chat)
+        
+        await websocket.send_text(json.dumps({
+            "type": "initial_data",
+            "chats": user_chats,
+            "user": manager.users[user_id]
+        }))
+        
+        # Broadcast user online status
+        await manager.broadcast(json.dumps({
+            "type": "user_online",
+            "user": manager.users[user_id]
+        }))
         
         while True:
-            # Receive message from client
             data = await websocket.receive_text()
             message_data = json.loads(data)
             
-            # Handle different message types
-            await handle_message(user_id, message_data)
+            if message_data["type"] == "send_message":
+                chat_id = message_data["chat_id"]
+                text = message_data["text"]
+                
+                if chat_id in chats:
+                    # Create new message
+                    new_message = {
+                        "id": str(uuid.uuid4()),
+                        "text": text,
+                        "sender": user_id,
+                        "senderName": manager.users[user_id]["name"],
+                        "time": datetime.now().strftime("%I:%M %p"),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
+                    # Add to chat
+                    chats[chat_id]["messages"].append(new_message)
+                    
+                    # Broadcast to all participants
+                    for participant in chats[chat_id]["participants"]:
+                        await manager.send_personal_message(
+                            json.dumps({
+                                "type": "new_message",
+                                "chat_id": chat_id,
+                                "message": new_message
+                            }),
+                            participant
+                        )
             
     except WebSocketDisconnect:
-        connection_manager.disconnect(user_id)
-        await broadcast_user_status_update()
-    except Exception as e:
-        print(f"Error in websocket connection for user {user_id}: {e}")
-        connection_manager.disconnect(user_id)
-
-async def send_initial_data(websocket: WebSocket, user_id: str):
-    """Send initial chat data and online users to newly connected client"""
-    # Get user's chats
-    user_chats = chat_service.get_user_chats(user_id)
-    
-    # Get online users
-    online_users = connection_manager.get_online_users()
-    
-    initial_data = {
-        "type": "initial_data",
-        "chats": [chat.to_dict() for chat in user_chats],
-        "online_users": online_users,
-        "user_id": user_id
-    }
-    
-    await websocket.send_text(json.dumps(initial_data))
-    
-    # Broadcast that this user is now online
-    await broadcast_user_status_update()
-
-async def handle_message(sender_id: str, message_data: dict):
-    """Handle incoming messages from clients"""
-    message_type = message_data.get("type")
-    
-    if message_type == "send_message":
-        await handle_send_message(sender_id, message_data)
-    elif message_type == "join_chat":
-        await handle_join_chat(sender_id, message_data)
-    elif message_type == "create_chat":
-        await handle_create_chat(sender_id, message_data)
-    elif message_type == "typing":
-        await handle_typing(sender_id, message_data)
-
-async def handle_send_message(sender_id: str, message_data: dict):
-    """Handle sending a message to a chat"""
-    chat_id = message_data.get("chat_id")
-    text = message_data.get("text")
-    
-    if not chat_id or not text:
-        return
-    
-    # Create and save message
-    message = chat_service.add_message(chat_id, sender_id, text)
-    if not message:
-        return
-    
-    # Get chat participants
-    chat = chat_service.get_chat(chat_id)
-    if not chat:
-        return
-    
-    # Prepare message for broadcast
-    message_payload = {
-        "type": "new_message",
-        "chat_id": chat_id,
-        "message": message.to_dict()
-    }
-    
-    # Send to all participants in the chat
-    for participant_id in chat.participants:
-        await connection_manager.send_personal_message(
-            json.dumps(message_payload), 
-            participant_id
-        )
-
-async def handle_join_chat(sender_id: str, message_data: dict):
-    """Handle user joining a chat"""
-    chat_id = message_data.get("chat_id")
-    
-    if not chat_id:
-        return
-    
-    # Add user to chat
-    success = chat_service.add_user_to_chat(chat_id, sender_id)
-    
-    if success:
-        # Notify all participants
-        chat = chat_service.get_chat(chat_id)
-        join_payload = {
-            "type": "user_joined",
-            "chat_id": chat_id,
-            "user_id": sender_id,
-            "chat": chat.to_dict() if chat else None
-        }
-        
-        for participant_id in chat.participants:
-            await connection_manager.send_personal_message(
-                json.dumps(join_payload), 
-                participant_id
-            )
-
-async def handle_create_chat(sender_id: str, message_data: dict):
-    """Handle creating a new chat"""
-    chat_name = message_data.get("name")
-    chat_type = message_data.get("chat_type", "private")  # private or group
-    participants = message_data.get("participants", [])
-    
-    if not chat_name:
-        return
-    
-    # Add sender to participants
-    if sender_id not in participants:
-        participants.append(sender_id)
-    
-    # Create new chat
-    new_chat = chat_service.create_chat(chat_name, chat_type, participants)
-    
-    if new_chat:
-        # Notify all participants about the new chat
-        chat_payload = {
-            "type": "new_chat",
-            "chat": new_chat.to_dict()
-        }
-        
-        for participant_id in participants:
-            await connection_manager.send_personal_message(
-                json.dumps(chat_payload), 
-                participant_id
-            )
-
-async def handle_typing(sender_id: str, message_data: dict):
-    """Handle typing indicators"""
-    chat_id = message_data.get("chat_id")
-    is_typing = message_data.get("is_typing", False)
-    
-    if not chat_id:
-        return
-    
-    chat = chat_service.get_chat(chat_id)
-    if not chat:
-        return
-    
-    # Broadcast typing status to other participants
-    typing_payload = {
-        "type": "typing",
-        "chat_id": chat_id,
-        "user_id": sender_id,
-        "is_typing": is_typing
-    }
-    
-    for participant_id in chat.participants:
-        if participant_id != sender_id:  # Don't send to sender
-            await connection_manager.send_personal_message(
-                json.dumps(typing_payload), 
-                participant_id
-            )
-
-async def broadcast_user_status_update():
-    """Broadcast online users update to all connected clients"""
-    online_users = connection_manager.get_online_users()
-    
-    status_payload = {
-        "type": "online_users_update",
-        "online_users": online_users
-    }
-    
-    await connection_manager.broadcast(json.dumps(status_payload))
-
-# REST API endpoints for additional functionality
-@app.get("/api/users/online")
-async def get_online_users():
-    """Get list of currently online users"""
-    return {"online_users": connection_manager.get_online_users()}
-
-@app.get("/api/chats/{user_id}")
-async def get_user_chats(user_id: str):
-    """Get all chats for a specific user"""
-    chats = chat_service.get_user_chats(user_id)
-    return {"chats": [chat.to_dict() for chat in chats]}
-
-@app.get("/api/chats/{chat_id}/messages")
-async def get_chat_messages(chat_id: str, limit: int = 50):
-    """Get messages for a specific chat"""
-    messages = chat_service.get_chat_messages(chat_id, limit)
-    return {"messages": [msg.to_dict() for msg in messages]}
+        manager.disconnect(user_id)
+        await manager.broadcast(json.dumps({
+            "type": "user_offline",
+            "user_id": user_id
+        }))
 
 if __name__ == "__main__":
     import uvicorn

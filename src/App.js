@@ -1,117 +1,209 @@
-import { useState } from "react";
-import Sidebar from "./components/Sidebar";
-import { BrowserRouter as Router, Routes, Route } from "react-router-dom";
-import ChatWindow from "./components/ChatWindow";
-import "./App.css";
-import LoginPage from "./pages/LoginPage";
-import SignUpPage from "./pages/SignUpPage";
-import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import React, { useState, useEffect, useRef } from 'react';
+import './App.css';
 
-export default function App() {
-  const [activeChatId, setActiveChatId] = useState(1);
+function App() {
   const [user, setUser] = useState(null);
-  const [chats, setChats] = useState([
-    {
-      id: 1,
-      type: "private",
-      name: "Alice",
-      avatar: "https://i.pravatar.cc/150?img=1",
-      messages: [
-        { text: "Hey there!", sender: "Alice", time: "10:00 AM" },
-        { text: "How are you?", sender: "Me", time: "10:01 AM" },
-      ],
-    },
-    {
-      id: 2,
-      type: "private",
-      name: "Bob",
-      avatar: "https://i.pravatar.cc/150?img=2",
-      messages: [{ text: "Meeting at 3?", sender: "Bob", time: "10:02 AM" }],
-    },
-    {
-      id: 3,
-      type: "group",
-      name: "Team Project",
-      avatar: "https://i.pravatar.cc/150?img=5",
-      participants: ["Me", "Alice", "Bob", "Eve"],
-      messages: [
-        { text: "Let’s start the call!", sender: "Alice", time: "09:00 AM" },
-        { text: "Joining in 5 mins", sender: "Eve", time: "09:01 AM" },
-        { text: "I’m here!", sender: "Me", time: "09:02 AM" },
-      ],
-    },
-  ]);
+  const [chats, setChats] = useState([]);
+  const [activeChat, setActiveChat] = useState(null);
+  const [message, setMessage] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const wsRef = useRef(null);
 
-  // if (!user) return <LoginPage onLogin={setUser} />;
-
-  const activeChat = chats.find((chat) => chat.id === activeChatId);
-
-  const handleSendMessage = (chatId, text) => {
-    setChats((prev) =>
-      prev.map((chat) =>
-        chat.id === chatId
-          ? {
-              ...chat,
-              messages: [
-                ...chat.messages,
-                {
-                  text,
-                  sender: "Me",
-                  time: new Date().toLocaleTimeString([], {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }),
-                },
-              ],
-            }
-          : chat
-      )
-    );
+  // Login handler
+  const handleLogin = (username) => {
+    if (username.trim()) {
+      setUser({ id: username, name: username });
+      connectWebSocket(username);
+    }
   };
 
-  // return (
-  //   <div className="flex h-screen">
-  //     <Sidebar
-  //       chats={chats}
-  //       activeChatId={activeChatId}
-  //       onSelectChat={setActiveChatId}
-  //     />
-  //     <ChatWindow
-  //       chat={activeChat}
-  //       onSendMessage={(text) => handleSendMessage(activeChatId, text)}
-  //     />
-  //   </div>
-  // );
+  // WebSocket connection
+  const connectWebSocket = (userId) => {
+    wsRef.current = new WebSocket(`ws://localhost:8000/ws/${userId}`);
+    
+    wsRef.current.onopen = () => {
+      console.log('Connected to WebSocket');
+    };
+    
+    wsRef.current.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      
+      switch(data.type) {
+        case 'initial_data':
+          setChats(data.chats);
+          if (data.chats.length > 0) {
+            setActiveChat(data.chats[0]);
+          }
+          break;
+          
+        case 'new_message':
+          setChats(prevChats => 
+            prevChats.map(chat => 
+              chat.id === data.chat_id 
+                ? { ...chat, messages: [...chat.messages, data.message] }
+                : chat
+            )
+          );
+          
+          // Update active chat if it's the same
+          setActiveChat(prevActive => 
+            prevActive && prevActive.id === data.chat_id
+              ? { ...prevActive, messages: [...prevActive.messages, data.message] }
+              : prevActive
+          );
+          break;
+          
+        default:
+          break;
+      }
+    };
+    
+    wsRef.current.onclose = () => {
+      console.log('WebSocket disconnected');
+    };
+  };
+
+  // Send message
+  const sendMessage = () => {
+    if (message.trim() && activeChat && wsRef.current) {
+      wsRef.current.send(JSON.stringify({
+        type: 'send_message',
+        chat_id: activeChat.id,
+        text: message
+      }));
+      setMessage('');
+    }
+  };
+
+  // Filter chats based on search
+  const filteredChats = chats.filter(chat =>
+    chat.name.toLowerCase().includes(searchText.toLowerCase())
+  );
+
+  // Login screen
+  if (!user) {
+    return (
+      <div className="login-container">
+        <div className="login-box">
+          <h2>Welcome to Chat</h2>
+          <input
+            type="text"
+            placeholder="Enter your username"
+            onKeyPress={(e) => {
+              if (e.key === 'Enter') {
+                handleLogin(e.target.value);
+              }
+            }}
+          />
+          <button onClick={(e) => {
+            const input = e.target.previousElementSibling;
+            handleLogin(input.value);
+          }}>
+            Join Chat
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<LoginPage onLogin={setUser} />} />
-        <Route path="/signup" element={<SignUpPage />} />
-        <Route path="/forgot" element={<ForgotPasswordPage />} />
-        <Route
-          path="/chat"
-          element={
-            user ? (
-              <div className="flex h-screen">
-                <Sidebar
-                  chats={chats}
-                  activeChatId={activeChatId}
-                  onSelectChat={setActiveChatId}
-                />
-                <ChatWindow
-                  chat={activeChat}
-                  onSendMessage={(text) =>
-                    handleSendMessage(activeChatId, text)
+    <div className="app">
+      {/* Sidebar */}
+      <div className="sidebar">
+        <div className="sidebar-header">
+          <h3>Chats</h3>
+          <div className="user-info">
+            <span>{user.name}</span>
+          </div>
+        </div>
+        
+        <div className="search-box">
+          <input
+            type="text"
+            placeholder="Search chats..."
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+          />
+        </div>
+        
+        <div className="chat-list">
+          {filteredChats.map(chat => (
+            <div
+              key={chat.id}
+              className={`chat-item ${activeChat?.id === chat.id ? 'active' : ''}`}
+              onClick={() => setActiveChat(chat)}
+            >
+              <img src={chat.avatar} alt={chat.name} className="avatar" />
+              <div className="chat-info">
+                <div className="chat-name">
+                  {chat.name}
+                  {chat.type === 'group' && <span className="group-badge">Group</span>}
+                </div>
+                <div className="last-message">
+                  {chat.messages.length > 0 
+                    ? chat.messages[chat.messages.length - 1].text
+                    : 'No messages yet'
                   }
-                />
+                </div>
               </div>
-            ) : (
-              <LoginPage onLogin={setUser} />
-            )
-          }
-        />
-      </Routes>
-    </Router>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Chat Window */}
+      <div className="chat-window">
+        {activeChat ? (
+          <>
+            {/* Chat Header */}
+            <div className="chat-header">
+              <img src={activeChat.avatar} alt={activeChat.name} className="avatar" />
+              <div className="chat-info">
+                <h3>{activeChat.name}</h3>
+                <span className="status">
+                  {activeChat.type === 'group' ? `${activeChat.participants.length} members` : 'Online'}
+                </span>
+              </div>
+            </div>
+
+            {/* Messages */}
+            <div className="messages-container">
+              {activeChat.messages.map(msg => (
+                <div
+                  key={msg.id}
+                  className={`message ${msg.sender === user.id ? 'sent' : 'received'}`}
+                >
+                  {activeChat.type === 'group' && msg.sender !== user.id && (
+                    <div className="sender-name">{msg.senderName}</div>
+                  )}
+                  <div className="message-content">
+                    <span className="message-text">{msg.text}</span>
+                    <span className="message-time">{msg.time}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Message Input */}
+            <div className="message-input">
+              <input
+                type="text"
+                placeholder="Type a message..."
+                value={message}
+                onChange={(e) => setMessage(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+              />
+              <button onClick={sendMessage}>Send</button>
+            </div>
+          </>
+        ) : (
+          <div className="no-chat">
+            <h3>Select a chat to start messaging</h3>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
+
+export default App;

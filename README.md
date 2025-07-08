@@ -1,70 +1,121 @@
-# Getting Started with Create React App
+# Simple Chat Application
 
-This project was bootstrapped with [Create React App](https://github.com/facebook/create-react-app).
+A real-time chat application built with React frontend and FastAPI backend using WebSockets.
 
-## Available Scripts
+## Features
 
-In the project directory, you can run:
+- ✅ Real-time messaging
+- ✅ Multiple chat rooms (private and group)
+- ✅ User authentication (simple username-based)
+- ✅ Online user status
+- ✅ Message history
+- ✅ Search functionality
+- ✅ Responsive design
 
-### `npm start`
+## Quick Start
 
-Runs the app in the development mode.\
-Open [http://localhost:3000](http://localhost:3000) to view it in your browser.
+### 1. Start the Backend
 
-The page will reload when you make changes.\
-You may also see any lint errors in the console.
+```bash
+cd backend
+pip install -r requirements.txt
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
 
-### `npm test`
+### 2. Start the Frontend
 
-Launches the test runner in the interactive watch mode.\
-See the section about [running tests](https://facebook.github.io/create-react-app/docs/running-tests) for more information.
+```bash
+npm install
+npm start
+```
 
-### `npm run build`
+### 3. Open the App
 
-Builds the app for production to the `build` folder.\
-It correctly bundles React in production mode and optimizes the build for the best performance.
+- Frontend: http://localhost:3000
+- Backend API: http://localhost:8000
 
-The build is minified and the filenames include the hashes.\
-Your app is ready to be deployed!
+## How to Test
 
-See the section about [deployment](https://facebook.github.io/create-react-app/docs/deployment) for more information.
+1. Open http://localhost:3000 in your browser
+2. Enter any username and click "Join Chat"
+3. You'll see pre-loaded chats with Alice, Bob, and Team Project
+4. Click on any chat to start messaging
+5. Open multiple browser tabs with different usernames to test real-time messaging
 
-### `npm run eject`
+## Default Test Users
 
-**Note: this is a one-way operation. Once you `eject`, you can't go back!**
+The app comes with sample data:
+- **alice** - Has access to all chats
+- **bob** - Has access to private chats and group
+- **charlie** - Part of the Team Project group
+- **diana** - Part of the Team Project group
 
-If you aren't satisfied with the build tool and configuration choices, you can `eject` at any time. This command will remove the single build dependency from your project.
+## Architecture
 
-Instead, it will copy all the configuration files and the transitive dependencies (webpack, Babel, ESLint, etc) right into your project so you have full control over them. All of the commands except `eject` will still work, but they will point to the copied scripts so you can tweak them. At this point you're on your own.
+### Backend (FastAPI + WebSocket)
+- `main.py` - Main FastAPI application with WebSocket endpoints
+- Real-time message broadcasting
+- In-memory data storage
+- CORS enabled for React frontend
 
-You don't have to ever use `eject`. The curated feature set is suitable for small and middle deployments, and you shouldn't feel obligated to use this feature. However we understand that this tool wouldn't be useful if you couldn't customize it when you are ready for it.
+### Frontend (React)
+- `App.js` - Main React component with chat logic
+- `App.css` - Complete styling for the chat interface
+- WebSocket connection for real-time updates
+- Responsive design
 
-## Learn More
+## API Endpoints
 
-You can learn more in the [Create React App documentation](https://facebook.github.io/create-react-app/docs/getting-started).
+### WebSocket
+- `ws://localhost:8000/ws/{user_id}` - Main chat WebSocket
 
-To learn React, check out the [React documentation](https://reactjs.org/).
+### Message Types
+- `send_message` - Send a new message
+- `initial_data` - Receive chat history on connection
+- `new_message` - Receive new messages in real-time
 
-### Code Splitting
+## Customization
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/code-splitting](https://facebook.github.io/create-react-app/docs/code-splitting)
+### Adding New Chats
+Edit the `chats` dictionary in `backend/main.py`:
 
-### Analyzing the Bundle Size
+```python
+chats["new_chat_id"] = {
+    "id": "new_chat_id",
+    "name": "New Chat",
+    "type": "private",  # or "group"
+    "avatar": "https://i.pravatar.cc/150?img=6",
+    "participants": ["user1", "user2"],
+    "messages": []
+}
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size](https://facebook.github.io/create-react-app/docs/analyzing-the-bundle-size)
+### Styling
+Modify `src/App.css` to change the appearance. The design uses:
+- Clean, modern interface
+- Gradient login screen
+- WhatsApp-inspired chat bubbles
+- Responsive layout
 
-### Making a Progressive Web App
+## Production Deployment
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app](https://facebook.github.io/create-react-app/docs/making-a-progressive-web-app)
+### Backend
+```bash
+pip install gunicorn
+gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
+```
 
-### Advanced Configuration
+### Frontend
+```bash
+npm run build
+# Serve the build folder with any static file server
+```
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/advanced-configuration](https://facebook.github.io/create-react-app/docs/advanced-configuration)
+## Troubleshooting
 
-### Deployment
+1. **WebSocket connection failed**: Make sure backend is running on port 8000
+2. **CORS errors**: Backend is configured for localhost:3000
+3. **Messages not appearing**: Check browser console for WebSocket errors
+4. **Port conflicts**: Change ports in both frontend and backend if needed
 
-This section has moved here: [https://facebook.github.io/create-react-app/docs/deployment](https://facebook.github.io/create-react-app/docs/deployment)
-
-### `npm run build` fails to minify
-
-This section has moved here: [https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify](https://facebook.github.io/create-react-app/docs/troubleshooting#npm-run-build-fails-to-minify)
+The application is designed to work out of the box with no additional configuration required.
