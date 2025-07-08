@@ -138,6 +138,7 @@ function App() {
                 <div className="chat-name">
                   {chat.name}
                   {chat.type === 'group' && <span className="group-badge">Group</span>}
+                  }
                 </div>
                 <div className="last-message">
                   {chat.messages.length > 0 
